@@ -51,11 +51,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <chrono>
 #include <limits>
 
+static const int WRITE_BLOCK_BUFFER_SIZE = 8000;
+
 ExtractionContainers::ExtractionContainers()
 {
     // Check if stxxl can be instantiated
     stxxl::vector<unsigned> dummy_vector;
-    name_list.push_back("");
+    // Insert the empty string, it has no data and is zero length
+    name_lengths.push_back(0);
 }
 
 ExtractionContainers::~ExtractionContainers()
@@ -64,7 +67,8 @@ ExtractionContainers::~ExtractionContainers()
     used_node_id_list.clear();
     all_nodes_list.clear();
     all_edges_list.clear();
-    name_list.clear();
+    name_char_data.clear();
+    name_lengths.clear();
     restrictions_list.clear();
     way_start_end_id_list.clear();
 }
@@ -116,13 +120,10 @@ void ExtractionContainers::WriteNames(const std::string& names_file_name) const
     boost::filesystem::ofstream name_file_stream(names_file_name, std::ios::binary);
 
     unsigned total_length = 0;
-    std::vector<unsigned> name_lengths;
-    for (const std::string &temp_string : name_list)
+
+    for (const unsigned &name_length : name_lengths)
     {
-        const unsigned string_length =
-            std::min(static_cast<unsigned>(temp_string.length()), 255u);
-        name_lengths.push_back(string_length);
-        total_length += string_length;
+        total_length += name_length;
     }
 
     // builds and writes the index
@@ -130,13 +131,24 @@ void ExtractionContainers::WriteNames(const std::string& names_file_name) const
     name_file_stream << name_index_range;
 
     name_file_stream.write((char *)&total_length, sizeof(unsigned));
+
+
     // write all chars consecutively
-    for (const std::string &temp_string : name_list)
+    char write_buffer[WRITE_BLOCK_BUFFER_SIZE];
+    unsigned buffer_len = 0;
+
+    for (const char &c : name_char_data)
     {
-        const unsigned string_length =
-            std::min(static_cast<unsigned>(temp_string.length()), 255u);
-        name_file_stream.write(temp_string.c_str(), string_length);
+        write_buffer[buffer_len++] = c;
+
+        if (buffer_len >= WRITE_BLOCK_BUFFER_SIZE)
+        {
+            name_file_stream.write(write_buffer, WRITE_BLOCK_BUFFER_SIZE);
+            buffer_len = 0;
+        }
     }
+
+    name_file_stream.write(write_buffer, buffer_len);
 
     name_file_stream.close();
     TIMER_STOP(write_name_index);
@@ -196,7 +208,7 @@ void ExtractionContainers::PrepareNodes()
         node_iter++;
         ref_iter++;
     }
-    if (internal_id > std::numeric_limits<NodeID>::max()) 
+    if (internal_id > std::numeric_limits<NodeID>::max())
     {
         throw osrm::exception("There are too many nodes remaining after filtering, OSRM only supports 2^32 unique nodes");
     }
@@ -507,7 +519,7 @@ void ExtractionContainers::WriteEdges(std::ofstream& file_out_stream) const
     std::cout << "[extractor] setting number of edges   ... " << std::flush;
 
     used_edges_counter_buffer = boost::numeric_cast<unsigned>(used_edges_counter);
-    
+
     file_out_stream.seekp(start_position);
     file_out_stream.write((char *)&used_edges_counter_buffer, sizeof(unsigned));
     std::cout << "ok" << std::endl;

@@ -153,10 +153,12 @@ void ExtractorCallbacks::ProcessWay(const osmium::Way &input_way, const Extracti
 
     // Get the unique identifier for the street name
     const auto &string_map_iterator = string_map.find(parsed_way.name);
-    unsigned name_id = external_memory.name_list.size();
+    unsigned name_id = external_memory.name_lengths.size();
     if (string_map.end() == string_map_iterator)
     {
-        external_memory.name_list.push_back(parsed_way.name);
+        auto name_length = std::min<unsigned>(255u, parsed_way.name.size());
+        std::copy(parsed_way.name.c_str(), parsed_way.name.c_str() + name_length, std::back_inserter(external_memory.name_char_data));
+        external_memory.name_lengths.push_back(name_length);
         string_map.insert(std::make_pair(parsed_way.name, name_id));
     }
     else
@@ -191,7 +193,7 @@ void ExtractorCallbacks::ProcessWay(const osmium::Way &input_way, const Extracti
                                 external_memory.all_edges_list.push_back(InternalExtractorEdge(
                                     OSMNodeID(first_node.ref()), OSMNodeID(last_node.ref()), name_id,
                                     backward_weight_data, true, false, parsed_way.roundabout,
-                                    parsed_way.is_access_restricted,
+                                    parsed_way.is_access_restricted, parsed_way.is_startpoint,
                                     parsed_way.backward_travel_mode, false));
                             });
 
@@ -212,7 +214,7 @@ void ExtractorCallbacks::ProcessWay(const osmium::Way &input_way, const Extracti
                                 external_memory.all_edges_list.push_back(InternalExtractorEdge(
                                     OSMNodeID(first_node.ref()), OSMNodeID(last_node.ref()), name_id, forward_weight_data,
                                     true, !forward_only, parsed_way.roundabout,
-                                    parsed_way.is_access_restricted, parsed_way.forward_travel_mode,
+                                    parsed_way.is_access_restricted, parsed_way.is_startpoint, parsed_way.forward_travel_mode,
                                     split_edge));
                             });
         if (split_edge)
@@ -225,7 +227,7 @@ void ExtractorCallbacks::ProcessWay(const osmium::Way &input_way, const Extracti
                     external_memory.all_edges_list.push_back(InternalExtractorEdge(
                         OSMNodeID(first_node.ref()), OSMNodeID(last_node.ref()), name_id, backward_weight_data, false,
                         true, parsed_way.roundabout, parsed_way.is_access_restricted,
-                        parsed_way.backward_travel_mode, true));
+                        parsed_way.is_startpoint, parsed_way.backward_travel_mode, true));
                 });
         }
 

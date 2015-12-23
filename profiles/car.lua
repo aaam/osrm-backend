@@ -128,6 +128,8 @@ maxspeed_table = {
   ["uk:motorway"] = (70*1609)/1000
 }
 
+-- these need to be global because they are accesed externaly
+u_turn_penalty                  = 20
 traffic_signal_penalty          = 2
 use_turn_restrictions           = true
 
@@ -138,7 +140,6 @@ local turn_bias                 = 1.2
 
 local obey_oneway               = true
 local ignore_areas              = true
-local u_turn_penalty            = 20
 
 local abs = math.abs
 local min = math.min
@@ -448,6 +449,9 @@ function way_function (way, result)
     end
     result.backward_speed = math.min(penalized_speed, scaled_speed)
   end
+
+  -- only allow this road as start point if it not a ferry
+  result.is_startpoint = result.forward_mode == mode_normal or result.backward_mode == mode_normal
 end
 
 function turn_function (angle)

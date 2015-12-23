@@ -57,7 +57,7 @@ struct SubMatching
     double confidence;
 };
 
-using CandidateList = std::vector<std::pair<PhantomNode, double>>;
+using CandidateList = std::vector<PhantomNodeWithDistance>;
 using CandidateLists = std::vector<CandidateList>;
 using HMM = HiddenMarkovModel<CandidateLists>;
 using SubMatchingList = std::vector<SubMatching>;
@@ -106,20 +106,23 @@ class MapMatching final : public BasicRoutingInterface<DataFacadeT, MapMatching<
                     osrm::matching::SubMatchingList &sub_matchings) const
     {
         BOOST_ASSERT(candidates_list.size() == trace_coordinates.size());
+        BOOST_ASSERT(candidates_list.size() > 1);
+
+        const bool use_timestamps = trace_timestamps.size() > 1;
 
         const auto median_sample_time = [&]() {
-            if (trace_timestamps.size() > 1)
+            if (use_timestamps)
             {
-                return GetMedianSampleTime(trace_timestamps);
+                return std::max(1u, GetMedianSampleTime(trace_timestamps));
             }
             else
             {
-                return 0u;
+                return 1u;
             }
         }();
         const auto max_broken_time = median_sample_time * osrm::matching::MAX_BROKEN_STATES;
         const auto max_distance_delta = [&]() {
-            if (trace_timestamps.size() > 1)
+            if (use_timestamps)
             {
                 return median_sample_time * osrm::matching::MAX_SPEED;
             }
@@ -161,7 +164,7 @@ class MapMatching final : public BasicRoutingInterface<DataFacadeT, MapMatching<
             bool trace_split = prev_unbroken_timestamps.empty();
 
             // use temporal information if available to determine a split
-            if (!trace_timestamps.empty())
+            if (use_timestamps)
             {
                 trace_split =
                     trace_split ||
@@ -232,7 +235,7 @@ class MapMatching final : public BasicRoutingInterface<DataFacadeT, MapMatching<
                     // how likely is candidate s_prime at time t to be emitted?
                     // FIXME this can be pre-computed
                     const double emission_pr =
-                        emission_log_probability(candidates_list[t][s_prime].second);
+                        emission_log_probability(candidates_list[t][s_prime].distance);
                     double new_value = prev_viterbi[s] + emission_pr;
                     if (current_viterbi[s_prime] > new_value)
                     {
@@ -244,8 +247,8 @@ class MapMatching final : public BasicRoutingInterface<DataFacadeT, MapMatching<
 
                     // get distance diff between loc1/2 and locs/s_prime
                     const auto network_distance = super::get_network_distance(
-                        forward_heap, reverse_heap, prev_unbroken_timestamps_list[s].first,
-                        current_timestamps_list[s_prime].first);
+                        forward_heap, reverse_heap, prev_unbroken_timestamps_list[s].phantom_node,
+                        current_timestamps_list[s_prime].phantom_node);
 
                     const auto d_t = std::abs(network_distance - haversine_distance);
 
@@ -365,7 +368,7 @@ class MapMatching final : public BasicRoutingInterface<DataFacadeT, MapMatching<
                 const auto location_index = reconstructed_indices[i].second;
 
                 matching.indices[i] = timestamp_index;
-                matching.nodes[i] = candidates_list[timestamp_index][location_index].first;
+                matching.nodes[i] = candidates_list[timestamp_index][location_index].phantom_node;
                 matching.length += model.path_lengths[timestamp_index][location_index];
 
                 matching_debug.add_chosen(timestamp_index, location_index);

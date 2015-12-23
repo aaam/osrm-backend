@@ -25,11 +25,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#include "library/osrm.hpp"
 #include "server/server.hpp"
 #include "util/version.hpp"
 #include "util/routed_options.hpp"
 #include "util/simple_logger.hpp"
+
+#include <osrm/osrm.hpp>
+#include <osrm/libosrm_config.hpp>
 
 #ifdef __linux__
 #include <sys/mman.h>
@@ -72,13 +74,11 @@ int main(int argc, const char *argv[]) try
     std::string ip_address;
     int ip_port, requested_thread_num;
 
-    libosrm_config lib_config;
-    // make the behaviour of routed backward compatible
-    lib_config.use_shared_memory = false;
-
+    LibOSRMConfig lib_config;
     const unsigned init_result = GenerateServerProgramOptions(
         argc, argv, lib_config.server_paths, ip_address, ip_port, requested_thread_num,
-        lib_config.use_shared_memory, trial_run, lib_config.max_locations_distance_table,
+        lib_config.use_shared_memory, trial_run, lib_config.max_locations_trip, lib_config.max_locations_viaroute,
+        lib_config.max_locations_distance_table,
         lib_config.max_locations_map_matching);
     if (init_result == INIT_OK_DO_NOT_START_ENGINE)
     {

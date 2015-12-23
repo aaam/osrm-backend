@@ -8,8 +8,8 @@ endif()
 
 project(OSRM C CXX)
 set(OSRM_VERSION_MAJOR 4)
-set(OSRM_VERSION_MINOR 8)
-set(OSRM_VERSION_PATCH 1)
+set(OSRM_VERSION_MINOR 9)
+set(OSRM_VERSION_PATCH 0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(CheckCXXCompilerFlag)
@@ -46,7 +46,7 @@ add_custom_target(FingerPrintConfigure ALL ${CMAKE_COMMAND}
   COMMENT "Configuring revision fingerprint"
   VERBATIM)
 
-add_custom_target(tests DEPENDS datastructure-tests algorithm-tests)
+add_custom_target(tests DEPENDS datastructure-tests algorithm-tests util-tests)
 add_custom_target(benchmarks DEPENDS rtree-bench)
 
 set(BOOST_COMPONENTS date_time filesystem iostreams program_options regex system thread unit_test_framework)
@@ -85,6 +85,7 @@ file(GLOB HttpGlob server/http/*.cpp)
 file(GLOB LibOSRMGlob library/*.cpp)
 file(GLOB DataStructureTestsGlob unit_tests/data_structures/*.cpp data_structures/hilbert_value.cpp)
 file(GLOB AlgorithmTestsGlob unit_tests/algorithms/*.cpp algorithms/graph_compressor.cpp)
+file(GLOB UtilTestsGlob unit_tests/util/*.cpp)
 
 set(
   OSRMSources
@@ -109,6 +110,7 @@ add_executable(osrm-datastore datastore.cpp $<TARGET_OBJECTS:COORDINATE> $<TARGE
 # Unit tests
 add_executable(datastructure-tests EXCLUDE_FROM_ALL unit_tests/datastructure_tests.cpp ${DataStructureTestsGlob} $<TARGET_OBJECTS:COORDINATE> $<TARGET_OBJECTS:LOGGER> $<TARGET_OBJECTS:PHANTOMNODE> $<TARGET_OBJECTS:EXCEPTION> $<TARGET_OBJECTS:MERCATOR> $<TARGET_OBJECTS:COMPRESSEDEDGE> $<TARGET_OBJECTS:GRAPHCOMPRESSOR> $<TARGET_OBJECTS:RESTRICTION> $<TARGET_OBJECTS:RASTERSOURCE>)
 add_executable(algorithm-tests EXCLUDE_FROM_ALL unit_tests/algorithm_tests.cpp ${AlgorithmTestsGlob} $<TARGET_OBJECTS:COORDINATE> $<TARGET_OBJECTS:LOGGER> $<TARGET_OBJECTS:PHANTOMNODE> $<TARGET_OBJECTS:EXCEPTION> $<TARGET_OBJECTS:RESTRICTION> $<TARGET_OBJECTS:COMPRESSEDEDGE>)
+add_executable(util-tests EXCLUDE_FROM_ALL unit_tests/util_tests.cpp ${UtilTestsGlob})
 
 # Benchmarks
 add_executable(rtree-bench EXCLUDE_FROM_ALL benchmarks/static_rtree.cpp $<TARGET_OBJECTS:COORDINATE> $<TARGET_OBJECTS:LOGGER> $<TARGET_OBJECTS:PHANTOMNODE> $<TARGET_OBJECTS:EXCEPTION> $<TARGET_OBJECTS:MERCATOR>)
@@ -262,6 +264,7 @@ target_link_libraries(osrm-routed ${Boost_LIBRARIES} ${OPTIONAL_SOCKET_LIBS} OSR
 target_link_libraries(osrm-datastore ${Boost_LIBRARIES})
 target_link_libraries(datastructure-tests ${Boost_LIBRARIES})
 target_link_libraries(algorithm-tests ${Boost_LIBRARIES} ${OPTIONAL_SOCKET_LIBS} OSRM)
+target_link_libraries(util-tests ${Boost_LIBRARIES})
 target_link_libraries(rtree-bench ${Boost_LIBRARIES})
 
 find_package(Threads REQUIRED)
@@ -311,6 +314,7 @@ include_directories(SYSTEM ${STXXL_INCLUDE_DIR})
 target_link_libraries(OSRM ${STXXL_LIBRARY})
 target_link_libraries(osrm-extract ${STXXL_LIBRARY})
 target_link_libraries(osrm-prepare ${STXXL_LIBRARY})
+target_link_libraries(datastructure-tests ${STXXL_LIBRARY})
 
 set(OpenMP_FIND_QUIETLY ON)
 find_package(OpenMP)
@@ -372,7 +376,7 @@ if(BUILD_TOOLS)
   install(TARGETS osrm-springclean DESTINATION bin)
 endif()
 
-file(GLOB InstallGlob include/osrm/*.hpp library/osrm.hpp)
+file(GLOB InstallGlob include/osrm/*.hpp)
 file(GLOB VariantGlob third_party/variant/*.hpp)
 
 # Add RPATH info to executables so that when they are run after being installed
@@ -390,6 +394,7 @@ install(TARGETS osrm-prepare DESTINATION bin)
 install(TARGETS osrm-datastore DESTINATION bin)
 install(TARGETS osrm-routed DESTINATION bin)
 install(TARGETS OSRM DESTINATION lib)
+
 list(GET Boost_LIBRARIES 1 BOOST_LIBRARY_FIRST)
 get_filename_component(BOOST_LIBRARY_LISTING "${BOOST_LIBRARY_FIRST}" PATH)
 set(BOOST_LIBRARY_LISTING "-L${BOOST_LIBRARY_LISTING}")
@@ -397,6 +402,14 @@ foreach(lib ${Boost_LIBRARIES})
   get_filename_component(BOOST_LIBRARY_NAME "${lib}" NAME_WE)
   string(REPLACE "lib" "" BOOST_LIBRARY_NAME ${BOOST_LIBRARY_NAME})
   set(BOOST_LIBRARY_LISTING "${BOOST_LIBRARY_LISTING} -l${BOOST_LIBRARY_NAME}")
+endforeach()
+list(GET TBB_LIBRARIES 1 TBB_LIBRARY_FIRST)
+get_filename_component(TBB_LIBRARY_LISTING "${TBB_LIBRARY_FIRST}" PATH)
+set(TBB_LIBRARY_LISTING "-L${TBB_LIBRARY_LISTING}")
+foreach(lib ${TBB_LIBRARIES})
+  get_filename_component(TBB_LIBRARY_NAME "${lib}" NAME_WE)
+  string(REPLACE "lib" "" TBB_LIBRARY_NAME ${TBB_LIBRARY_NAME})
+  set(TBB_LIBRARY_LISTING "${TBB_LIBRARY_LISTING} -l${TBB_LIBRARY_NAME}")
 endforeach()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/pkgconfig.in libosrm.pc @ONLY)

@@ -122,16 +122,12 @@ struct PhantomNode
 static_assert(sizeof(PhantomNode) == 48, "PhantomNode has more padding then expected");
 #endif
 
-using PhantomNodeArray = std::vector<std::vector<PhantomNode>>;
+using PhantomNodePair = std::pair<PhantomNode, PhantomNode>;
 
-class phantom_node_pair : public std::pair<PhantomNode, PhantomNode>
+struct PhantomNodeWithDistance
 {
-};
-
-struct PhantomNodeLists
-{
-    std::vector<PhantomNode> source_phantom_list;
-    std::vector<PhantomNode> target_phantom_list;
+    PhantomNode phantom_node;
+    double distance;
 };
 
 struct PhantomNodes

@@ -57,9 +57,12 @@ template <class DataFacadeT> class ViaRoutePlugin final : public BasePlugin
     std::string descriptor_string;
     std::unique_ptr<SearchEngine<DataFacadeT>> search_engine_ptr;
     DataFacadeT *facade;
+    int max_locations_viaroute;
 
   public:
-    explicit ViaRoutePlugin(DataFacadeT *facade) : descriptor_string("viaroute"), facade(facade)
+    explicit ViaRoutePlugin(DataFacadeT *facade, int max_locations_viaroute)
+        : descriptor_string("viaroute"), facade(facade),
+          max_locations_viaroute(max_locations_viaroute)
     {
         search_engine_ptr = osrm::make_unique<SearchEngine<DataFacadeT>>(facade);
 
@@ -72,22 +75,34 @@ template <class DataFacadeT> class ViaRoutePlugin final : public BasePlugin
 
     const std::string GetDescriptor() const override final { return descriptor_string; }
 
-    int HandleRequest(const RouteParameters &route_parameters,
+    Status HandleRequest(const RouteParameters &route_parameters,
                       osrm::json::Object &json_result) override final
     {
+        if (max_locations_viaroute > 0 &&
+            (static_cast<int>(route_parameters.coordinates.size()) > max_locations_viaroute))
+        {
+            json_result.values["status_message"] =
+                "Number of entries " + std::to_string(route_parameters.coordinates.size()) +
+                " is higher than current maximum (" + std::to_string(max_locations_viaroute) + ")";
+            return Status::Error;
+        }
+
         if (!check_all_coordinates(route_parameters.coordinates))
         {
-            return 400;
+            json_result.values["status_message"] = "Invalid coordinates";
+            return Status::Error;
         }
 
         const auto &input_bearings = route_parameters.bearings;
-        if (input_bearings.size() > 0 && route_parameters.coordinates.size() != input_bearings.size())
+        if (input_bearings.size() > 0 &&
+            route_parameters.coordinates.size() != input_bearings.size())
         {
-            json_result.values["status"] = "Number of bearings does not match number of coordinates .";
-            return 400;
+            json_result.values["status_message"] =
+                "Number of bearings does not match number of coordinate";
+            return Status::Error;
         }
 
-        std::vector<phantom_node_pair> phantom_node_pair_list(route_parameters.coordinates.size());
+        std::vector<PhantomNodePair> phantom_node_pair_list(route_parameters.coordinates.size());
         const bool checksum_OK = (route_parameters.check_sum == facade->GetCheckSum());
 
         for (const auto i : osrm::irange<std::size_t>(0, route_parameters.coordinates.size()))
@@ -96,83 +111,39 @@ template <class DataFacadeT> class ViaRoutePlugin final : public BasePlugin
                 !route_parameters.hints[i].empty())
             {
                 ObjectEncoder::DecodeFromBase64(route_parameters.hints[i],
-                                                phantom_node_pair_list[i]);
+                                                phantom_node_pair_list[i].first);
                 if (phantom_node_pair_list[i].first.is_valid(facade->GetNumberOfNodes()))
                 {
                     continue;
                 }
             }
-            std::vector<PhantomNode> phantom_node_vector;
             const int bearing = input_bearings.size() > 0 ? input_bearings[i].first : 0;
-            const int range = input_bearings.size() > 0 ? (input_bearings[i].second?*input_bearings[i].second:10) : 180;
-            if (facade->IncrementalFindPhantomNodeForCoordinate(route_parameters.coordinates[i],
-                                                                phantom_node_vector, 1, bearing, range))
+            const int range = input_bearings.size() > 0
+                                  ? (input_bearings[i].second ? *input_bearings[i].second : 10)
+                                  : 180;
+            phantom_node_pair_list[i] = facade->NearestPhantomNodeWithAlternativeFromBigComponent(
+                route_parameters.coordinates[i], bearing, range);
+            // we didn't found a fitting node, return error
+            if (!phantom_node_pair_list[i].first.is_valid(facade->GetNumberOfNodes()))
             {
-                BOOST_ASSERT(!phantom_node_vector.empty());
-                phantom_node_pair_list[i].first = phantom_node_vector.front();
-                if (phantom_node_vector.size() > 1)
-                {
-                    phantom_node_pair_list[i].second = phantom_node_vector.back();
-                }
-
+                json_result.values["status_message"] =
+                    std::string("Could not find a matching segment for coordinate ") +
+                    std::to_string(i);
+                return Status::NoSegment;
             }
-            else
-            {
-                json_result.values["status_message"] = std::string("Could not find a matching segment for coordinate ") + std::to_string(i);
-                return 400;
-            }
+            BOOST_ASSERT(phantom_node_pair_list[i].first.is_valid(facade->GetNumberOfNodes()));
+            BOOST_ASSERT(phantom_node_pair_list[i].second.is_valid(facade->GetNumberOfNodes()));
         }
 
-        const auto check_component_id_is_tiny = [](const phantom_node_pair &phantom_pair)
-        {
-            return phantom_pair.first.component.is_tiny;
-        };
-
-        const bool every_phantom_is_in_tiny_cc =
-            std::all_of(std::begin(phantom_node_pair_list), std::end(phantom_node_pair_list),
-                        check_component_id_is_tiny);
-
-        // are all phantoms from a tiny cc?
-        const auto check_all_in_same_component = [](const std::vector<phantom_node_pair> &nodes)
-        {
-            const auto component_id = nodes.front().first.component.id;
-
-            return std::all_of(std::begin(nodes), std::end(nodes),
-                               [component_id](const phantom_node_pair &phantom_pair)
-                               {
-                                   return component_id == phantom_pair.first.component.id;
-                               });
-        };
-
-        auto swap_phantom_from_big_cc_into_front = [](phantom_node_pair &phantom_pair)
-        {
-            if (phantom_pair.first.component.is_tiny && phantom_pair.second.is_valid() && !phantom_pair.second.component.is_tiny)
-            {
-                using namespace std;
-                swap(phantom_pair.first, phantom_pair.second);
-            }
-        };
-
-        auto all_in_same_component = check_all_in_same_component(phantom_node_pair_list);
-
-        // this case is true if we take phantoms from the big CC
-        if (every_phantom_is_in_tiny_cc && !all_in_same_component)
-        {
-            std::for_each(std::begin(phantom_node_pair_list), std::end(phantom_node_pair_list),
-                          swap_phantom_from_big_cc_into_front);
-
-            // update check with new component ids
-            all_in_same_component = check_all_in_same_component(phantom_node_pair_list);
-        }
+        auto snapped_phantoms = snapPhantomNodes(phantom_node_pair_list);
 
         InternalRouteResult raw_route;
-        auto build_phantom_pairs =
-            [&raw_route](const phantom_node_pair &first_pair, const phantom_node_pair &second_pair)
+        auto build_phantom_pairs = [&raw_route](const PhantomNode &first_node,
+                                                const PhantomNode &second_node)
         {
-            raw_route.segment_end_coordinates.emplace_back(
-                PhantomNodes{first_pair.first, second_pair.first});
+            raw_route.segment_end_coordinates.push_back(PhantomNodes{first_node, second_node});
         };
-        osrm::for_each_pair(phantom_node_pair_list, build_phantom_pairs);
+        osrm::for_each_pair(snapped_phantoms, build_phantom_pairs);
 
         if (1 == raw_route.segment_end_coordinates.size())
         {
@@ -195,11 +166,6 @@ template <class DataFacadeT> class ViaRoutePlugin final : public BasePlugin
 
         bool no_route = INVALID_EDGE_WEIGHT == raw_route.shortest_path_length;
 
-        if (no_route)
-        {
-            SimpleLogger().Write(logDEBUG) << "Error occurred, single path not found";
-        }
-
         std::unique_ptr<BaseDescriptor<DataFacadeT>> descriptor;
         switch (descriptor_table.get_id(route_parameters.output_format))
         {
@@ -219,13 +185,27 @@ template <class DataFacadeT> class ViaRoutePlugin final : public BasePlugin
 
         // we can only know this after the fact, different SCC ids still
         // allow for connection in one direction.
-        if (!all_in_same_component && no_route)
+        if (no_route)
         {
-            json_result.values["status_message"] = "Impossible route between points.";
-            return 400;
+            auto first_component_id = snapped_phantoms.front().component.id;
+            auto not_in_same_component =
+                std::any_of(snapped_phantoms.begin(), snapped_phantoms.end(),
+                            [first_component_id](const PhantomNode &node)
+                            {
+                                return node.component.id != first_component_id;
+                            });
+            if (not_in_same_component)
+            {
+                json_result.values["status_message"] = "Impossible route between points";
+                return Status::EmptyResult;
+            }
+        }
+        else
+        {
+            json_result.values["status_message"] = "Found route between points";
         }
 
-        return 200;
+        return Status::Ok;
     }
 };
 

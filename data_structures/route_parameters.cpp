@@ -61,11 +61,9 @@ void RouteParameters::setAlternateRouteFlag(const bool flag) { alternate_route =
 
 void RouteParameters::setUTurn(const bool flag)
 {
-    uturns.resize(coordinates.size(), uturn_default);
-    if (!uturns.empty())
-    {
-        uturns.back() = flag;
-    }
+    // the API grammar should make sure this never happens
+    BOOST_ASSERT(!uturns.empty());
+    uturns.back() = flag;
 }
 
 void RouteParameters::setAllUTurns(const bool flag)
@@ -146,6 +144,31 @@ void RouteParameters::addCoordinate(
     coordinates.emplace_back(
         static_cast<int>(COORDINATE_PRECISION * boost::fusion::at_c<0>(received_coordinates)),
         static_cast<int>(COORDINATE_PRECISION * boost::fusion::at_c<1>(received_coordinates)));
+    is_source.push_back(true);
+    is_destination.push_back(true);
+    uturns.push_back(uturn_default);
+}
+
+void RouteParameters::addDestination(
+    const boost::fusion::vector<double, double> &received_coordinates)
+{
+    coordinates.emplace_back(
+        static_cast<int>(COORDINATE_PRECISION * boost::fusion::at_c<0>(received_coordinates)),
+        static_cast<int>(COORDINATE_PRECISION * boost::fusion::at_c<1>(received_coordinates)));
+    is_source.push_back(false);
+    is_destination.push_back(true);
+    uturns.push_back(uturn_default);
+}
+
+void RouteParameters::addSource(
+    const boost::fusion::vector<double, double> &received_coordinates)
+{
+    coordinates.emplace_back(
+        static_cast<int>(COORDINATE_PRECISION * boost::fusion::at_c<0>(received_coordinates)),
+        static_cast<int>(COORDINATE_PRECISION * boost::fusion::at_c<1>(received_coordinates)));
+    is_source.push_back(true);
+    is_destination.push_back(false);
+    uturns.push_back(uturn_default);
 }
 
 void RouteParameters::getCoordinatesFromGeometry(const std::string &geometry_string)
@@ -153,3 +176,4 @@ void RouteParameters::getCoordinatesFromGeometry(const std::string &geometry_str
     PolylineCompressor pc;
     coordinates = pc.decode_string(geometry_string);
 }
+
